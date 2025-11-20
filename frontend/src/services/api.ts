@@ -107,4 +107,35 @@ export const api = {
   // Weekly Synthesis
   getWeeklySynthesis: () =>
     fetchAPI<any>('/synthesis/weekly'),
+
+  // Message management
+  editMessage: (messageId: number, content: string) =>
+    fetchAPI<{ id: number; content: string; updated_at: string }>(`/messages/${messageId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+    }),
+
+  deleteMessage: (messageId: number) =>
+    fetchAPI<{ status: string; id: number }>(`/messages/${messageId}`, {
+      method: 'DELETE',
+    }),
+
+  getMessageAudio: (messageId: number) =>
+    `${API_BASE}/messages/${messageId}/audio`,
+
+  createJournalEntry: (conversationId: number, content: string) =>
+    fetchAPI<any>(`/messages/${conversationId}/journal`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+
+  // User preferences
+  getPreferences: () =>
+    fetchAPI<{ hume_enabled: boolean; voice_mode: string }>('/auth/preferences'),
+
+  updatePreferences: (preferences: { hume_enabled: boolean; voice_mode: string }) =>
+    fetchAPI<{ status: string; preferences: any }>('/auth/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(preferences),
+    }),
 };

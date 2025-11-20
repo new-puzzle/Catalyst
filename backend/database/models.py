@@ -16,7 +16,30 @@ class User(Base):
     google_id = Column(String(255), unique=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # User preferences
+    preferences = Column(JSON, default=dict)  # {hume_enabled: true, voice_mode: "hume"|"browser"|"live"}
+
     conversations = relationship("Conversation", back_populates="user")
+    state_summaries = relationship("UserState", back_populates="user")
+
+
+class UserState(Base):
+    """Daily/periodic summary of user's state for AI context."""
+    __tablename__ = "user_states"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    period_type = Column(String(50))  # daily, weekly
+
+    # AI-generated summary
+    summary = Column(Text)
+    themes = Column(JSON)  # Key themes detected
+    emotional_trends = Column(JSON)  # Emotion patterns
+    goals_progress = Column(JSON)  # Goal tracking
+    recommendations = Column(JSON)
+
+    user = relationship("User", back_populates="state_summaries")
 
 
 class Conversation(Base):
@@ -40,6 +63,11 @@ class Message(Base):
     role = Column(String(50))  # user, assistant
     content = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=True)
+
+    # Input type and audio
+    input_type = Column(String(50), default="text")  # text, voice, voice_live
+    audio_file_path = Column(String(500), nullable=True)
 
     # AI metadata
     ai_provider = Column(String(50), nullable=True)  # gemini, deepseek, claude
@@ -48,6 +76,9 @@ class Message(Base):
 
     # Emotion data from Hume
     emotion_data = Column(JSON, nullable=True)
+
+    # Journal-only flag (no AI response requested)
+    journal_only = Column(Integer, default=0)
 
     conversation = relationship("Conversation", back_populates="messages")
 

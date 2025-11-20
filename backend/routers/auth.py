@@ -151,3 +151,34 @@ async def get_me(current_user: User = Depends(get_current_user)):
 async def logout():
     """Logout - client should discard token."""
     return {"status": "logged out"}
+
+
+class UserPreferences(BaseModel):
+    hume_enabled: bool = True
+    voice_mode: str = "hume"  # hume, browser, live
+
+
+@router.get("/preferences")
+async def get_preferences(
+    current_user: User = Depends(get_current_user)
+):
+    """Get user preferences."""
+    return current_user.preferences or {
+        "hume_enabled": True,
+        "voice_mode": "hume"
+    }
+
+
+@router.put("/preferences")
+async def update_preferences(
+    preferences: UserPreferences,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Update user preferences (Hume toggle, voice mode, etc.)."""
+    current_user.preferences = preferences.model_dump()
+    db.commit()
+    return {
+        "status": "updated",
+        "preferences": current_user.preferences
+    }

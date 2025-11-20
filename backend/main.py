@@ -3,7 +3,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import conversations_router, synthesis_router, auth_router, documents_router, voice_router
+from .routers import conversations_router, synthesis_router, auth_router, documents_router, voice_router, messages_router
+from .services.scheduler import start_scheduler, stop_scheduler
 from .config import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -33,6 +34,7 @@ app.include_router(conversations_router)
 app.include_router(synthesis_router)
 app.include_router(documents_router)
 app.include_router(voice_router)
+app.include_router(messages_router)
 
 
 @app.on_event("startup")
@@ -40,9 +42,17 @@ def startup():
     try:
         init_db()
         logger.info("Database initialized successfully")
+        start_scheduler()
+        logger.info("Background scheduler started")
     except Exception as e:
-        logger.error(f"Failed to initialize database: {e}")
+        logger.error(f"Failed to initialize: {e}")
         raise
+
+
+@app.on_event("shutdown")
+def shutdown():
+    stop_scheduler()
+    logger.info("Background scheduler stopped")
 
 
 @app.get("/")

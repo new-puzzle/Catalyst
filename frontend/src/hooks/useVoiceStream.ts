@@ -4,9 +4,11 @@ interface VoiceStreamOptions {
   onTextResponse: (text: string) => void;
   onStatusChange: (status: string) => void;
   onError: (error: string) => void;
+  userId?: number;
+  conversationId?: number;
 }
 
-export function useVoiceStream({ onTextResponse, onStatusChange, onError }: VoiceStreamOptions) {
+export function useVoiceStream({ onTextResponse, onStatusChange, onError, userId, conversationId }: VoiceStreamOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -24,6 +26,12 @@ export function useVoiceStream({ onTextResponse, onStatusChange, onError }: Voic
     const ws = new WebSocket(`${protocol}//${window.location.host}/api/voice/stream`);
 
     ws.onopen = () => {
+      // Send init message with user and conversation IDs
+      ws.send(JSON.stringify({
+        type: 'init',
+        user_id: userId,
+        conversation_id: conversationId
+      }));
       setIsConnected(true);
       onStatusChange('Connected');
     };
@@ -76,7 +84,7 @@ export function useVoiceStream({ onTextResponse, onStatusChange, onError }: Voic
     };
 
     wsRef.current = ws;
-  }, [onTextResponse, onStatusChange, onError]);
+  }, [onTextResponse, onStatusChange, onError, userId, conversationId]);
 
   // Disconnect
   const disconnect = useCallback(() => {
