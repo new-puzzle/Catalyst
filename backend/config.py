@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     app_name: str = "Catalyst - AI Smart Journal"
     debug: bool = True
 
+    # CORS
+    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+
     # Database
     database_url: str = "sqlite:///./data/db/conversations.db"
     chroma_persist_dir: str = "./data/db/vector_store"

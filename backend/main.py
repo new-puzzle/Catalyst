@@ -1,9 +1,13 @@
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
 from .routers import conversations_router, synthesis_router, auth_router
 from .config import get_settings
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -13,10 +17,11 @@ app = FastAPI(
     version="0.1.0",
 )
 
-# CORS for frontend
+# CORS from environment configuration
+cors_origins = [origin.strip() for origin in settings.cors_origins.split(",")]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -30,7 +35,12 @@ app.include_router(synthesis_router)
 
 @app.on_event("startup")
 def startup():
-    init_db()
+    try:
+        init_db()
+        logger.info("Database initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database: {e}")
+        raise
 
 
 @app.get("/")
