@@ -1,110 +1,243 @@
 import logging
 import json
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
-from sqlalchemy.orm import Session
-import httpx
+import asyncio
+import base64
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+import websockets
 
-from ..database import get_db
 from ..config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/voice", tags=["voice"])
 
+# Gemini Live API configuration
+GEMINI_LIVE_MODEL = "gemini-2.0-flash-live-preview"
+GEMINI_LIVE_WS_URL = "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1alpha.GenerativeService.BidiGenerateContent"
+
 
 @router.websocket("/stream")
 async def voice_stream(websocket: WebSocket):
     """
-    WebSocket endpoint for real-time voice conversation.
+    Real-time voice conversation using Gemini Live API.
 
     Protocol:
-    - Client sends: {"type": "audio", "data": "<base64 audio>"}
+    - Client sends: {"type": "audio", "data": "<base64 PCM audio>"}
     - Client sends: {"type": "text", "data": "user message"}
-    - Server responds: {"type": "text", "data": "AI response"}
-    - Server responds: {"type": "audio", "data": "<base64 audio>"} (TTS)
-    - Server responds: {"type": "emotion", "data": {...}}
-
-    Note: Full implementation requires Gemini Multimodal Live API access.
-    This is a foundational WebSocket structure.
+    - Client sends: {"type": "interrupt"} - to interrupt AI response
+    - Server sends: {"type": "audio", "data": "<base64 PCM audio>"}
+    - Server sends: {"type": "text", "data": "transcript"}
+    - Server sends: {"type": "status", "data": "..."}
     """
     await websocket.accept()
     logger.info("Voice stream connected")
 
+    if not settings.gemini_api_key:
+        await websocket.send_json({"type": "error", "data": "Gemini API key not configured"})
+        await websocket.close()
+        return
+
+    gemini_ws = None
+
     try:
-        while True:
-            # Receive message from client
-            data = await websocket.receive_text()
-            message = json.loads(data)
+        # Connect to Gemini Live API
+        gemini_url = f"{GEMINI_LIVE_WS_URL}?key={settings.gemini_api_key}"
+        gemini_ws = await websockets.connect(gemini_url)
+        logger.info("Connected to Gemini Live API")
 
-            msg_type = message.get("type")
-            content = message.get("data")
+        # Send initial setup message
+        setup_message = {
+            "setup": {
+                "model": f"models/{GEMINI_LIVE_MODEL}",
+                "generationConfig": {
+                    "responseModalities": ["AUDIO", "TEXT"],
+                    "speechConfig": {
+                        "voiceConfig": {
+                            "prebuiltVoiceConfig": {
+                                "voiceName": "Aoede"  # Warm, conversational voice
+                            }
+                        }
+                    }
+                },
+                "systemInstruction": {
+                    "parts": [{
+                        "text": """You are Catalyst, an empathetic AI journaling companion.
+                        Help users reflect on their thoughts and feelings.
+                        Be warm, supportive, and conversational.
+                        Keep responses concise since this is voice conversation.
+                        When the user pauses, encourage them to continue or ask thoughtful questions."""
+                    }]
+                }
+            }
+        }
+        await gemini_ws.send(json.dumps(setup_message))
 
-            if msg_type == "text":
-                # Process text message through standard AI
-                response = await process_text_message(content)
-                await websocket.send_json({
-                    "type": "text",
-                    "data": response
-                })
+        # Wait for setup confirmation
+        setup_response = await gemini_ws.recv()
+        setup_data = json.loads(setup_response)
+        if "setupComplete" in setup_data:
+            await websocket.send_json({"type": "status", "data": "Connected to voice AI"})
+        else:
+            logger.warning(f"Unexpected setup response: {setup_data}")
 
-            elif msg_type == "audio":
-                # Process audio - requires Gemini Live API
-                # For now, send acknowledgment
-                await websocket.send_json({
-                    "type": "status",
-                    "data": "Audio processing requires Gemini Multimodal Live API"
-                })
+        # Create tasks for bidirectional streaming
+        client_to_gemini = asyncio.create_task(
+            forward_client_to_gemini(websocket, gemini_ws)
+        )
+        gemini_to_client = asyncio.create_task(
+            forward_gemini_to_client(websocket, gemini_ws)
+        )
 
-            elif msg_type == "config":
-                # Client configuration (mode, etc.)
-                await websocket.send_json({
-                    "type": "status",
-                    "data": "Configuration received"
-                })
+        # Wait for either task to complete (client disconnect or error)
+        done, pending = await asyncio.wait(
+            [client_to_gemini, gemini_to_client],
+            return_when=asyncio.FIRST_COMPLETED
+        )
 
+        # Cancel pending tasks
+        for task in pending:
+            task.cancel()
+
+    except websockets.exceptions.WebSocketException as e:
+        logger.error(f"Gemini WebSocket error: {e}")
+        await websocket.send_json({"type": "error", "data": f"Gemini connection error: {str(e)}"})
     except WebSocketDisconnect:
-        logger.info("Voice stream disconnected")
+        logger.info("Client disconnected")
     except Exception as e:
         logger.error(f"Voice stream error: {e}")
-        await websocket.close()
+        await websocket.send_json({"type": "error", "data": str(e)})
+    finally:
+        if gemini_ws:
+            await gemini_ws.close()
+        logger.info("Voice stream closed")
 
 
-async def process_text_message(content: str) -> str:
-    """Process text message through Gemini."""
-    if not settings.gemini_api_key:
-        return "Gemini API key required"
+async def forward_client_to_gemini(client_ws: WebSocket, gemini_ws):
+    """Forward messages from client to Gemini Live API."""
+    try:
+        while True:
+            data = await client_ws.receive_text()
+            message = json.loads(data)
+            msg_type = message.get("type")
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.gemini_api_key}",
-            json={
-                "contents": [{"role": "user", "parts": [{"text": content}]}],
-                "systemInstruction": {
-                    "parts": [{"text": "You are Catalyst, a helpful AI journaling assistant. Keep responses concise for voice."}]
+            if msg_type == "audio":
+                # Forward audio to Gemini
+                audio_data = message.get("data")
+                gemini_message = {
+                    "realtimeInput": {
+                        "mediaChunks": [{
+                            "mimeType": "audio/pcm;rate=16000",
+                            "data": audio_data
+                        }]
+                    }
                 }
-            },
-            timeout=30.0
-        )
-        data = response.json()
+                await gemini_ws.send(json.dumps(gemini_message))
 
-        if "candidates" in data:
-            return data["candidates"][0]["content"]["parts"][0]["text"]
+            elif msg_type == "text":
+                # Send text input
+                text_content = message.get("data")
+                gemini_message = {
+                    "clientContent": {
+                        "turns": [{
+                            "role": "user",
+                            "parts": [{"text": text_content}]
+                        }],
+                        "turnComplete": True
+                    }
+                }
+                await gemini_ws.send(json.dumps(gemini_message))
 
-    return "Unable to process message"
+            elif msg_type == "interrupt":
+                # Interrupt current response (barge-in)
+                # Send empty audio to signal interruption
+                await gemini_ws.send(json.dumps({
+                    "realtimeInput": {
+                        "mediaChunks": []
+                    }
+                }))
+
+            elif msg_type == "end_turn":
+                # Signal end of user turn
+                await gemini_ws.send(json.dumps({
+                    "clientContent": {
+                        "turnComplete": True
+                    }
+                }))
+
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        logger.error(f"Client to Gemini error: {e}")
 
 
-# Text-to-speech endpoint for generated responses
-@router.post("/tts")
-async def text_to_speech(text: str):
-    """
-    Convert text to speech.
+async def forward_gemini_to_client(client_ws: WebSocket, gemini_ws):
+    """Forward responses from Gemini Live API to client."""
+    try:
+        async for message in gemini_ws:
+            data = json.loads(message)
 
-    Note: Requires TTS service integration (e.g., Google Cloud TTS, ElevenLabs).
-    Returns audio data that can be played on client.
-    """
-    # Placeholder - would integrate with TTS service
+            # Handle different response types
+            if "serverContent" in data:
+                content = data["serverContent"]
+
+                # Model turn content
+                if "modelTurn" in content:
+                    model_turn = content["modelTurn"]
+                    for part in model_turn.get("parts", []):
+                        # Text response
+                        if "text" in part:
+                            await client_ws.send_json({
+                                "type": "text",
+                                "data": part["text"]
+                            })
+
+                        # Audio response
+                        if "inlineData" in part:
+                            inline_data = part["inlineData"]
+                            if "audio" in inline_data.get("mimeType", ""):
+                                await client_ws.send_json({
+                                    "type": "audio",
+                                    "data": inline_data["data"],
+                                    "mimeType": inline_data["mimeType"]
+                                })
+
+                # Turn complete signal
+                if content.get("turnComplete"):
+                    await client_ws.send_json({
+                        "type": "turn_complete",
+                        "data": True
+                    })
+
+                # Interrupted signal
+                if content.get("interrupted"):
+                    await client_ws.send_json({
+                        "type": "interrupted",
+                        "data": True
+                    })
+
+            # Handle tool calls if any
+            elif "toolCall" in data:
+                await client_ws.send_json({
+                    "type": "tool_call",
+                    "data": data["toolCall"]
+                })
+
+    except websockets.exceptions.ConnectionClosed:
+        pass
+    except Exception as e:
+        logger.error(f"Gemini to client error: {e}")
+
+
+@router.get("/voices")
+async def list_voices():
+    """List available voices for Gemini Live."""
     return {
-        "status": "TTS integration pending",
-        "text": text,
-        "note": "Integrate Google Cloud TTS or ElevenLabs for voice output"
+        "voices": [
+            {"name": "Aoede", "description": "Warm, conversational"},
+            {"name": "Charon", "description": "Deep, authoritative"},
+            {"name": "Fenrir", "description": "Energetic, youthful"},
+            {"name": "Kore", "description": "Calm, soothing"},
+            {"name": "Puck", "description": "Friendly, playful"}
+        ],
+        "default": "Aoede"
     }

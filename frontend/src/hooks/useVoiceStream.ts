@@ -2,38 +2,63 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 
 interface VoiceStreamOptions {
   onTextResponse: (text: string) => void;
-  onAudioResponse?: (audioData: string) => void;
+  onStatusChange: (status: string) => void;
   onError: (error: string) => void;
 }
 
-export function useVoiceStream({ onTextResponse, onAudioResponse, onError }: VoiceStreamOptions) {
+export function useVoiceStream({ onTextResponse, onStatusChange, onError }: VoiceStreamOptions) {
   const [isConnected, setIsConnected] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const wsRef = useRef<WebSocket | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
+  const wsRef = useRef<WebSocket | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioQueueRef = useRef<ArrayBuffer[]>([]);
+  const isPlayingRef = useRef(false);
+
+  // Connect to voice stream
   const connect = useCallback(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${protocol}//${window.location.host}/api/voice/stream`);
 
     ws.onopen = () => {
       setIsConnected(true);
-      console.log('Voice stream connected');
+      onStatusChange('Connected');
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = async (event) => {
       const message = JSON.parse(event.data);
 
       switch (message.type) {
         case 'text':
           onTextResponse(message.data);
           break;
+
         case 'audio':
-          onAudioResponse?.(message.data);
+          // Queue audio for playback
+          const audioData = base64ToArrayBuffer(message.data);
+          audioQueueRef.current.push(audioData);
+          if (!isPlayingRef.current) {
+            playNextAudio();
+          }
           break;
+
         case 'status':
-          console.log('Stream status:', message.data);
+          onStatusChange(message.data);
           break;
+
+        case 'turn_complete':
+          setIsSpeaking(false);
+          break;
+
+        case 'interrupted':
+          // Clear audio queue on interruption
+          audioQueueRef.current = [];
+          setIsSpeaking(false);
+          break;
+
         case 'error':
           onError(message.data);
           break;
@@ -41,86 +66,194 @@ export function useVoiceStream({ onTextResponse, onAudioResponse, onError }: Voi
     };
 
     ws.onerror = () => {
-      onError('WebSocket connection error');
+      onError('Connection error');
     };
 
     ws.onclose = () => {
       setIsConnected(false);
-      console.log('Voice stream disconnected');
+      setIsStreaming(false);
+      onStatusChange('Disconnected');
     };
 
     wsRef.current = ws;
-  }, [onTextResponse, onAudioResponse, onError]);
+  }, [onTextResponse, onStatusChange, onError]);
 
+  // Disconnect
   const disconnect = useCallback(() => {
+    stopStreaming();
     wsRef.current?.close();
     wsRef.current = null;
     setIsConnected(false);
   }, []);
 
+  // Start streaming audio
+  const startStreaming = useCallback(async () => {
+    if (!isConnected) {
+      connect();
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    try {
+      // Get microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          sampleRate: 16000,
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true
+        }
+      });
+      mediaStreamRef.current = stream;
+
+      // Create audio context for processing
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+
+      processor.onaudioprocess = (e) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          const inputData = e.inputBuffer.getChannelData(0);
+          // Convert float32 to int16 PCM
+          const pcmData = float32ToInt16(inputData);
+          const base64 = arrayBufferToBase64(pcmData.buffer);
+
+          wsRef.current.send(JSON.stringify({
+            type: 'audio',
+            data: base64
+          }));
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      setIsStreaming(true);
+      onStatusChange('Listening...');
+    } catch (err) {
+      onError('Microphone access denied');
+    }
+  }, [isConnected, connect, onStatusChange, onError]);
+
+  // Stop streaming
+  const stopStreaming = useCallback(() => {
+    if (processorRef.current) {
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach(track => track.stop());
+      mediaStreamRef.current = null;
+    }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    // Signal end of turn
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'end_turn' }));
+    }
+
+    setIsStreaming(false);
+    onStatusChange('Processing...');
+  }, [onStatusChange]);
+
+  // Interrupt AI response (barge-in)
+  const interrupt = useCallback(() => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'interrupt' }));
+      audioQueueRef.current = [];
+      setIsSpeaking(false);
+    }
+  }, []);
+
+  // Send text message
   const sendText = useCallback((text: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify({ type: 'text', data: text }));
     }
   }, []);
 
-  const startStreaming = useCallback(async () => {
-    if (!isConnected) {
-      connect();
-      // Wait for connection
-      await new Promise(resolve => setTimeout(resolve, 500));
+  // Play audio from queue
+  const playNextAudio = useCallback(async () => {
+    if (audioQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      return;
     }
+
+    isPlayingRef.current = true;
+    setIsSpeaking(true);
+
+    const audioData = audioQueueRef.current.shift()!;
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'audio/webm;codecs=opus'
-      });
+      const audioContext = new AudioContext({ sampleRate: 24000 }); // Gemini outputs at 24kHz
+      const audioBuffer = await audioContext.decodeAudioData(audioData);
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
 
-      mediaRecorder.ondataavailable = async (event) => {
-        if (event.data.size > 0 && wsRef.current?.readyState === WebSocket.OPEN) {
-          // Convert to base64 and send
-          const reader = new FileReader();
-          reader.onloadend = () => {
-            const base64 = (reader.result as string).split(',')[1];
-            wsRef.current?.send(JSON.stringify({ type: 'audio', data: base64 }));
-          };
-          reader.readAsDataURL(event.data);
-        }
+      source.onended = () => {
+        audioContext.close();
+        playNextAudio();
       };
 
-      mediaRecorder.start(1000); // Send chunks every second
-      mediaRecorderRef.current = mediaRecorder;
-      setIsStreaming(true);
+      source.start();
     } catch (err) {
-      onError('Microphone access denied');
+      console.error('Audio playback error:', err);
+      playNextAudio();
     }
-  }, [isConnected, connect, onError]);
-
-  const stopStreaming = useCallback(() => {
-    if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
-      mediaRecorderRef.current.stream.getTracks().forEach(track => track.stop());
-      mediaRecorderRef.current = null;
-    }
-    setIsStreaming(false);
   }, []);
 
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       disconnect();
-      stopStreaming();
     };
-  }, [disconnect, stopStreaming]);
+  }, [disconnect]);
 
   return {
     isConnected,
     isStreaming,
+    isSpeaking,
     connect,
     disconnect,
-    sendText,
     startStreaming,
-    stopStreaming
+    stopStreaming,
+    interrupt,
+    sendText
   };
+}
+
+// Utility functions
+function float32ToInt16(float32Array: Float32Array): Int16Array {
+  const int16Array = new Int16Array(float32Array.length);
+  for (let i = 0; i < float32Array.length; i++) {
+    const s = Math.max(-1, Math.min(1, float32Array[i]));
+    int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  }
+  return int16Array;
+}
+
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
 }
