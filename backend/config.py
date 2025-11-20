@@ -18,17 +18,35 @@ class Settings(BaseSettings):
     deepseek_api_key: str = ""
     anthropic_api_key: str = ""
 
-    # Hume AI
-    hume_api_key: str = ""
-
     # Google OAuth
     google_client_id: str = ""
     google_client_secret: str = ""
+    google_redirect_uri: str = ""
+    google_calendar_redirect_uri: str = ""
+    google_drive_redirect_uri: str = ""
+    google_api_key: str = ""
 
     # JWT Settings
     jwt_secret_key: str = "your-secret-key-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60 * 24 * 7  # 7 days
+    app_secret_key: str = ""
+
+    # Hume AI
+    hume_api_key: str = ""
+    hume_secret_key: str = ""
+
+    # Additional AI API Keys
+    mistral_api_key: str = ""
+    together_api_key: str = ""
+    openai_api_key: str = ""
+
+    # TTS Settings
+    tts_voice: str = ""
+    tts_encoding: str = ""
+
+    # App Settings
+    app_db_path: str = ""
 
     # Cost tracking (per 1M tokens)
     gemini_flash_cost: float = 0.075
