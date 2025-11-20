@@ -4,8 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
 from routers import conversations_router, synthesis_router, auth_router, documents_router, voice_router, messages_router
-from .services.scheduler import start_scheduler, stop_scheduler
-from .config import get_settings
+from services.scheduler import start_scheduler, stop_scheduler
+from config import get_settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
