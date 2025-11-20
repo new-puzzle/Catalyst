@@ -14,8 +14,8 @@ from models.schemas import (
     MessageResponse,
     UsageStats,
 )
-from ..services.ai_router import ai_router
-from ..services.vector_store import vector_store
+from services.ai_router import ai_router
+from services.vector_store import vector_store
 from .auth import get_current_user
 
 logger = logging.getLogger(__name__)

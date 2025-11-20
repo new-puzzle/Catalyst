@@ -5,10 +5,10 @@ import base64
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import websockets
 
-from ..config import get_settings
+from config import get_settings
 from database import SessionLocal
 from database.models import Conversation, Message
-from ..services.vector_store import vector_store
+from services.vector_store import vector_store
 
 settings = get_settings()
 logger = logging.getLogger(__name__)

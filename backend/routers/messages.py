@@ -9,7 +9,7 @@ from typing import Optional
 
 from database import get_db
 from database.models import Message, Conversation, User
-from ..services.vector_store import vector_store
+from services.vector_store import vector_store
 from .auth import get_current_user
 
 logger = logging.getLogger(__name__)

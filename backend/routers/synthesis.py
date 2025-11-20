@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from database import get_db
 from database.models import Message, EmotionLog
 from models.schemas import WeeklySynthesisResponse
-from ..services.ai_router import ai_router
+from services.ai_router import ai_router
 
 router = APIRouter(prefix="/synthesis", tags=["synthesis"])
 

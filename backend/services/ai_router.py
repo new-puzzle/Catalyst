@@ -2,7 +2,7 @@ from typing import List, Optional
 import httpx
 import logging
 from fastapi import HTTPException
-from ..config import get_settings
+from config import get_settings
 
 settings = get_settings()
 logger = logging.getLogger(__name__)

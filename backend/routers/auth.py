@@ -8,7 +8,7 @@ import httpx
 
 from database import get_db
 from database.models import User
-from ..config import get_settings
+from config import get_settings
 
 settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["authentication"])

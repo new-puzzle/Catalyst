@@ -4,8 +4,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 
-from ..database import SessionLocal
-from ..database.models import User, Message, Conversation, UserState
+from database import SessionLocal
+from database.models import User, Message, Conversation, UserState
 from .ai_router import ai_router
 
 logger = logging.getLogger(__name__)
