@@ -19,6 +19,16 @@ export function GoogleSignIn({ onSuccess, clientId }: GoogleSignInProps) {
 
     script.onload = () => {
       if (window.google && buttonRef.current) {
+        // Debug: Log the origin and client ID being used
+        console.log('Google Sign-In Debug:', {
+          origin: window.location.origin,
+          host: window.location.host,
+          protocol: window.location.protocol,
+          hostname: window.location.hostname,
+          port: window.location.port,
+          clientId: clientId ? clientId.substring(0, 20) + '...' : 'MISSING'
+        });
+        
         window.google.accounts.id.initialize({
           client_id: clientId,
           callback: (response: { credential: string }) => {
