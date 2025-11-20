@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    # JWT Settings
+    jwt_secret_key: str = "your-secret-key-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_minutes: int = 60 * 24 * 7  # 7 days
+
     # Cost tracking (per 1M tokens)
     gemini_flash_cost: float = 0.075
     deepseek_cost: float = 0.14

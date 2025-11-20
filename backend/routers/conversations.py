@@ -1,11 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func
 from typing import List
 from datetime import datetime, timedelta
 
 from ..database import get_db
-from ..database.models import Conversation, Message, UsageTracking
+from ..database.models import Conversation, Message, UsageTracking, User
 from ..models.schemas import (
     ConversationCreate,
     ConversationResponse,
@@ -15,13 +14,18 @@ from ..models.schemas import (
     UsageStats,
 )
 from ..services.ai_router import ai_router
+from .auth import get_current_user
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
 @router.post("/", response_model=ConversationResponse)
-def create_conversation(conv: ConversationCreate, db: Session = Depends(get_db)):
-    db_conv = Conversation(title=conv.title, mode=conv.mode)
+def create_conversation(
+    conv: ConversationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    db_conv = Conversation(title=conv.title, mode=conv.mode, user_id=current_user.id)
     db.add(db_conv)
     db.commit()
     db.refresh(db_conv)
@@ -29,9 +33,15 @@ def create_conversation(conv: ConversationCreate, db: Session = Depends(get_db))
 
 
 @router.get("/", response_model=List[ConversationSummary])
-def list_conversations(skip: int = 0, limit: int = 20, db: Session = Depends(get_db)):
+def list_conversations(
+    skip: int = 0,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     conversations = (
         db.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
         .order_by(Conversation.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -53,16 +63,30 @@ def list_conversations(skip: int = 0, limit: int = 20, db: Session = Depends(get
 
 
 @router.get("/{conversation_id}", response_model=ConversationResponse)
-def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
-    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+def get_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    conv = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id
+    ).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
 
 
 @router.delete("/{conversation_id}")
-def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
-    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+def delete_conversation(
+    conversation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    conv = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id
+    ).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     db.delete(conv)
@@ -72,9 +96,15 @@ def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{conversation_id}/messages", response_model=MessageResponse)
 async def send_message(
-    conversation_id: int, message: MessageCreate, db: Session = Depends(get_db)
+    conversation_id: int,
+    message: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    conv = db.query(Conversation).filter(
+        Conversation.id == conversation_id,
+        Conversation.user_id == current_user.id
+    ).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -137,7 +167,11 @@ def get_system_prompt(mode: str) -> str:
 
 
 @router.get("/stats/usage", response_model=UsageStats)
-def get_usage_stats(days: int = 30, db: Session = Depends(get_db)):
+def get_usage_stats(
+    days: int = 30,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     since = datetime.utcnow() - timedelta(days=days)
 
     usage = db.query(UsageTracking).filter(UsageTracking.date >= since).all()

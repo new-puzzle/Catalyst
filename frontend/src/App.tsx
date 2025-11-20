@@ -6,44 +6,120 @@ import {
   ModeInfo,
   ChatInterface,
   TextInput,
-  UsageStats
+  UsageStats,
+  ConversationHistory,
+  GoogleSignIn
 } from './components';
-import { api } from './services/api';
+import { api, setAuthToken, getAuthToken, AuthUser } from './services/api';
+import { useHumeVoice } from './hooks/useHumeVoice';
 import { Mode, Message, Conversation } from './types';
-import { Sparkles, History, Plus } from 'lucide-react';
+import { Sparkles, History, Plus, LogOut } from 'lucide-react';
+
+// Get from environment or config
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const HUME_API_KEY = import.meta.env.VITE_HUME_API_KEY || '';
 
 function App() {
+  const [user, setUser] = useState<AuthUser | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [mode, setMode] = useState<Mode>('auto');
-  const [isListening, setIsListening] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [showHistory, setShowHistory] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Create initial conversation
+  // Hume voice integration
+  const { isListening, isProcessing: isVoiceProcessing, toggleListening } = useHumeVoice({
+    apiKey: HUME_API_KEY,
+    onResult: (result) => {
+      if (result.transcript && result.transcript !== '[Voice input received - please type your message]') {
+        handleSendMessage(result.transcript, {
+          primaryEmotion: result.primaryEmotion,
+          emotions: result.emotions.reduce((acc, e) => ({ ...acc, [e.name]: e.score }), {}),
+        });
+      }
+    },
+    onError: (errorMsg) => {
+      setError(errorMsg);
+      setTimeout(() => setError(null), 3000);
+    },
+  });
+
+  // Check for existing auth on mount
   useEffect(() => {
-    createNewConversation();
+    const checkAuth = async () => {
+      if (getAuthToken()) {
+        try {
+          const userData = await api.getMe();
+          setUser(userData);
+        } catch {
+          setAuthToken(null);
+        }
+      }
+      setIsAuthLoading(false);
+    };
+    checkAuth();
   }, []);
+
+  // Create conversation when user logs in
+  useEffect(() => {
+    if (user && !conversation) {
+      createNewConversation();
+    }
+  }, [user]);
+
+  const handleGoogleSuccess = async (credential: string) => {
+    try {
+      const response = await api.googleAuth(credential);
+      setAuthToken(response.access_token);
+      setUser(response.user);
+    } catch {
+      setError('Authentication failed');
+      setTimeout(() => setError(null), 3000);
+    }
+  };
+
+  const handleLogout = () => {
+    setAuthToken(null);
+    setUser(null);
+    setConversation(null);
+    setMessages([]);
+  };
 
   const createNewConversation = async () => {
     try {
       const conv = await api.createConversation(undefined, mode);
       setConversation(conv);
       setMessages([]);
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
+    } catch (err) {
+      console.error('Failed to create conversation:', err);
     }
   };
 
-  const handleSendMessage = async (content: string) => {
+  const loadConversation = async (id: number) => {
+    try {
+      const conv = await api.getConversation(id);
+      setConversation(conv);
+      setMessages(conv.messages);
+      setMode(conv.mode as Mode);
+    } catch (err) {
+      console.error('Failed to load conversation:', err);
+    }
+  };
+
+  const handleSendMessage = async (content: string, emotionData?: Record<string, any>) => {
     if (!conversation) return;
 
     setIsProcessing(true);
+    setError(null);
 
     // Add user message optimistically
     const tempUserMsg: Message = {
       id: Date.now(),
       role: 'user',
       content,
+      emotion_data: emotionData,
       created_at: new Date().toISOString(),
     };
     setMessages(prev => [...prev, tempUserMsg]);
@@ -51,8 +127,9 @@ function App() {
     try {
       const response = await api.sendMessage(conversation.id, content, mode);
       setMessages(prev => [...prev.slice(0, -1), tempUserMsg, response]);
-    } catch (error) {
-      console.error('Failed to send message:', error);
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      setError(err instanceof Error ? err.message : 'Failed to send message');
       // Remove optimistic message on error
       setMessages(prev => prev.slice(0, -1));
     } finally {
@@ -60,17 +137,33 @@ function App() {
     }
   };
 
-  const handleVoiceToggle = () => {
-    // TODO: Integrate with Hume AI for voice input
-    setIsListening(!isListening);
+  // Show loading state
+  if (isAuthLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gray-900">
+        <div className="text-center">
+          <Sparkles className="w-12 h-12 text-catalyst-500 mx-auto mb-4 animate-pulse" />
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
-    if (isListening) {
-      // Simulate voice input for demo
-      setTimeout(() => {
-        handleSendMessage("This is a simulated voice input. Real voice integration with Hume AI would capture actual speech.");
-      }, 1000);
-    }
-  };
+  // Show login if not authenticated
+  if (!user) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center bg-gray-900 p-4">
+        <div className="text-center mb-8">
+          <Sparkles className="w-16 h-16 text-catalyst-500 mx-auto mb-4" />
+          <h1 className="text-3xl font-bold mb-2">Catalyst</h1>
+          <p className="text-gray-400 max-w-md">
+            Your AI-powered smart journal. Voice-first, privacy-focused journaling with emotional intelligence.
+          </p>
+        </div>
+        <GoogleSignIn onSuccess={handleGoogleSuccess} clientId={GOOGLE_CLIENT_ID} />
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">
@@ -91,13 +184,37 @@ function App() {
             <Plus className="w-5 h-5" />
           </button>
           <button
+            onClick={() => setShowHistory(true)}
             className="p-2 text-gray-400 hover:text-white transition-colors"
             title="History"
           >
             <History className="w-5 h-5" />
           </button>
+          <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-700">
+            {user.picture && (
+              <img
+                src={user.picture}
+                alt={user.name}
+                className="w-8 h-8 rounded-full"
+              />
+            )}
+            <button
+              onClick={handleLogout}
+              className="p-2 text-gray-400 hover:text-white transition-colors"
+              title="Sign out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       </header>
+
+      {/* Error message */}
+      {error && (
+        <div className="mx-4 mt-2 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+          {error}
+        </div>
+      )}
 
       {/* Mode Selector */}
       <div className="flex flex-col items-center gap-2 p-4">
@@ -107,7 +224,7 @@ function App() {
 
       {/* Chat Area */}
       {messages.length > 0 ? (
-        <ChatInterface messages={messages} isLoading={isProcessing} />
+        <ChatInterface messages={messages} isLoading={isProcessing || isVoiceProcessing} />
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-8">
           <motion.div
@@ -117,31 +234,41 @@ function App() {
           >
             <VoiceOrb
               isListening={isListening}
-              isProcessing={isProcessing}
+              isProcessing={isProcessing || isVoiceProcessing}
               mode={mode}
-              onToggle={handleVoiceToggle}
+              onToggle={toggleListening}
             />
             <p className="mt-8 text-gray-400">
-              Start speaking or type below to begin your journal entry
+              {HUME_API_KEY
+                ? 'Start speaking or type below to begin your journal entry'
+                : 'Type below to begin your journal entry'}
             </p>
           </motion.div>
         </div>
       )}
 
       {/* Show voice orb inline when there are messages */}
-      {messages.length > 0 && (
+      {messages.length > 0 && HUME_API_KEY && (
         <div className="flex justify-center py-4">
           <VoiceOrb
             isListening={isListening}
-            isProcessing={isProcessing}
+            isProcessing={isProcessing || isVoiceProcessing}
             mode={mode}
-            onToggle={handleVoiceToggle}
+            onToggle={toggleListening}
           />
         </div>
       )}
 
       {/* Text Input */}
-      <TextInput onSend={handleSendMessage} disabled={isProcessing} />
+      <TextInput onSend={(msg) => handleSendMessage(msg)} disabled={isProcessing || isVoiceProcessing} />
+
+      {/* Conversation History Panel */}
+      <ConversationHistory
+        isOpen={showHistory}
+        onClose={() => setShowHistory(false)}
+        onSelectConversation={loadConversation}
+        currentConversationId={conversation?.id}
+      />
     </div>
   );
 }
