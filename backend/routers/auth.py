@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from pydantic import BaseModel
 import httpx
 
-from ..database import get_db
-from ..database.models import User
+from database import get_db
+from database.models import User
 from ..config import get_settings
 
 settings = get_settings()

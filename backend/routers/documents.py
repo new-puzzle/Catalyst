@@ -8,8 +8,8 @@ from datetime import datetime
 import io
 import json
 
-from ..database import get_db
-from ..database.models import Document, Conversation, Message, User
+from database import get_db
+from database.models import Document, Conversation, Message, User
 from ..services.vector_store import vector_store
 from ..config import get_settings
 from .auth import get_current_user

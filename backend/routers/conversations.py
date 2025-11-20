@@ -4,9 +4,9 @@ from sqlalchemy.orm import Session
 from typing import List
 from datetime import datetime, timedelta
 
-from ..database import get_db
-from ..database.models import Conversation, Message, UsageTracking, User
-from ..models.schemas import (
+from database import get_db
+from database.models import Conversation, Message, UsageTracking, User
+from models.schemas import (
     ConversationCreate,
     ConversationResponse,
     ConversationSummary,
