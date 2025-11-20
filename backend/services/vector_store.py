@@ -28,22 +28,35 @@ class VectorStore:
         if not settings.gemini_api_key:
             raise ValueError("Gemini API key required for embeddings")
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={settings.gemini_api_key}",
-                json={
-                    "model": "models/text-embedding-004",
-                    "content": {"parts": [{"text": text}]}
-                },
-                timeout=30.0
-            )
-            data = response.json()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={settings.gemini_api_key}",
+                    json={
+                        "model": "models/text-embedding-004",
+                        "content": {"parts": [{"text": text}]}
+                    },
+                    timeout=30.0
+                )
 
-            if "embedding" in data:
-                return data["embedding"]["values"]
-            else:
-                logger.error(f"Embedding error: {data}")
-                raise ValueError(f"Failed to generate embedding: {data.get('error', {}).get('message', 'Unknown error')}")
+                if response.status_code != 200:
+                    logger.error(f"Embedding API returned {response.status_code}: {response.text[:500]}")
+                    raise ValueError(f"Embedding API error (status {response.status_code})")
+
+                data = response.json()
+
+                if "embedding" in data:
+                    return data["embedding"]["values"]
+                else:
+                    logger.error(f"Embedding error: {data}")
+                    raise ValueError(f"Failed to generate embedding: {data.get('error', {}).get('message', 'Unknown error')}")
+
+        except httpx.TimeoutException:
+            logger.error("Embedding API timeout")
+            raise ValueError("Embedding API timeout")
+        except httpx.RequestError as e:
+            logger.error(f"Embedding network error: {e}")
+            raise ValueError(f"Network error for embeddings: {str(e)}")
 
     async def add_entry(
         self,
