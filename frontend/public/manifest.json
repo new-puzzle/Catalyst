@@ -1,0 +1,38 @@
+{
+  "name": "Catalyst - AI Smart Journal",
+  "short_name": "Catalyst",
+  "description": "Voice-first, privacy-focused AI journaling companion",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#111827",
+  "theme_color": "#0ea5e9",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "lifestyle"],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "New Entry",
+      "url": "/?mode=auto",
+      "description": "Start a new journal entry"
+    },
+    {
+      "name": "Architect Mode",
+      "url": "/?mode=architect",
+      "description": "Plan and structure goals"
+    }
+  ]
+}

@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from typing import List
@@ -14,8 +15,10 @@ from ..models.schemas import (
     UsageStats,
 )
 from ..services.ai_router import ai_router
+from ..services.vector_store import vector_store
 from .auth import get_current_user
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 
 
@@ -78,7 +81,7 @@ def get_conversation(
 
 
 @router.delete("/{conversation_id}")
-def delete_conversation(
+async def delete_conversation(
     conversation_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -89,6 +92,11 @@ def delete_conversation(
     ).first()
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Delete messages from vector store
+    for msg in conv.messages:
+        await vector_store.delete_entry(f"msg_{msg.id}")
+
     db.delete(conv)
     db.commit()
     return {"status": "deleted"}
@@ -117,9 +125,50 @@ async def send_message(
     )
     db.add(user_msg)
     db.commit()
+    db.refresh(user_msg)
+
+    # Embed user message in vector store
+    try:
+        await vector_store.add_entry(
+            entry_id=f"msg_{user_msg.id}",
+            content=message.content,
+            metadata={
+                "user_id": current_user.id,
+                "conversation_id": conversation_id,
+                "message_id": user_msg.id,
+                "role": "user",
+                "mode": message.mode,
+                "timestamp": user_msg.created_at.isoformat()
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to embed message: {e}")
+
+    # Retrieve relevant context from past entries
+    relevant_context = ""
+    try:
+        past_entries = await vector_store.search(
+            query=message.content,
+            user_id=current_user.id,
+            n_results=3
+        )
+        if past_entries:
+            context_parts = []
+            for entry in past_entries:
+                if entry["distance"] < 0.7:  # Only include if reasonably relevant
+                    timestamp = entry["metadata"].get("timestamp", "")
+                    context_parts.append(f"[{timestamp[:10]}]: {entry['content'][:200]}")
+            if context_parts:
+                relevant_context = "\n\nRelevant past journal entries:\n" + "\n".join(context_parts)
+    except Exception as e:
+        logger.warning(f"Failed to search context: {e}")
 
     # Build message history for context
-    history = [{"role": "system", "content": get_system_prompt(message.mode)}]
+    system_prompt = get_system_prompt(message.mode)
+    if relevant_context:
+        system_prompt += relevant_context
+
+    history = [{"role": "system", "content": system_prompt}]
     for msg in conv.messages:
         history.append({"role": msg.role, "content": msg.content})
     history.append({"role": "user", "content": message.content})
@@ -142,6 +191,25 @@ async def send_message(
     )
     db.add(assistant_msg)
 
+    # Embed assistant response in vector store
+    try:
+        db.refresh(assistant_msg)
+        await vector_store.add_entry(
+            entry_id=f"msg_{assistant_msg.id}",
+            content=ai_response["content"],
+            metadata={
+                "user_id": current_user.id,
+                "conversation_id": conversation_id,
+                "message_id": assistant_msg.id,
+                "role": "assistant",
+                "mode": message.mode,
+                "provider": ai_response["provider"],
+                "timestamp": assistant_msg.created_at.isoformat()
+            }
+        )
+    except Exception as e:
+        logger.warning(f"Failed to embed response: {e}")
+
     # Track usage
     usage = UsageTracking(
         provider=ai_response["provider"],
@@ -158,10 +226,10 @@ async def send_message(
 
 def get_system_prompt(mode: str) -> str:
     prompts = {
-        "auto": """You are Catalyst, an empathetic AI journaling companion. Help users reflect on their thoughts and feelings. Be warm, supportive, and help them gain insights from their daily experiences. Keep responses conversational and encouraging.""",
-        "architect": """You are Catalyst in Architect mode. Help users structure their goals, create action plans, and break down complex ideas into manageable steps. Be organized, analytical, and provide clear frameworks. Use bullet points and numbered lists when helpful.""",
-        "simulator": """You are Catalyst in Simulator mode. Help users practice conversations, prepare for interviews, or work through hypothetical scenarios. Provide realistic responses and constructive feedback. Adapt your tone to match the simulation context.""",
-        "scribe": """You are Catalyst in Scribe mode. Transform user's rough thoughts into polished, professional content. Whether it's emails, social posts, or documents, craft clear, well-structured text that maintains the user's voice while elevating the quality.""",
+        "auto": """You are Catalyst, an empathetic AI journaling companion. Help users reflect on their thoughts and feelings. Be warm, supportive, and help them gain insights from their daily experiences. Keep responses conversational and encouraging. When relevant past entries are provided, reference them to show continuity and deeper understanding of the user's journey.""",
+        "architect": """You are Catalyst in Architect mode. Help users structure their goals, create action plans, and break down complex ideas into manageable steps. Be organized, analytical, and provide clear frameworks. Use bullet points and numbered lists when helpful. Reference past entries to track goal progress and maintain consistency.""",
+        "simulator": """You are Catalyst in Simulator mode. Help users practice conversations, prepare for interviews, or work through hypothetical scenarios. Provide realistic responses and constructive feedback. Adapt your tone to match the simulation context. Use past entries to understand the user's communication patterns.""",
+        "scribe": """You are Catalyst in Scribe mode. Transform user's rough thoughts into polished, professional content. Whether it's emails, social posts, or documents, craft clear, well-structured text that maintains the user's voice while elevating the quality. Reference past entries to maintain consistent voice and style.""",
     }
     return prompts.get(mode, prompts["auto"])
 

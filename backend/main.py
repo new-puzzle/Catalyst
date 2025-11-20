@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import conversations_router, synthesis_router, auth_router
+from .routers import conversations_router, synthesis_router, auth_router, documents_router, voice_router
 from .config import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -31,6 +31,8 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(conversations_router)
 app.include_router(synthesis_router)
+app.include_router(documents_router)
+app.include_router(voice_router)
 
 
 @app.on_event("startup")
