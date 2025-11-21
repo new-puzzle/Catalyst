@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import {
   VoiceOrb,
@@ -69,16 +69,27 @@ function App() {
     }
   }, [user]);
 
-  const handleGoogleSuccess = async (credential: string) => {
+  const handleGoogleSuccess = useCallback(async (credential: string) => {
     try {
+      console.log('🔍 Google Sign-In successful, authenticating with backend...');
       const response = await api.googleAuth(credential);
+      console.log('✅ Backend authentication successful');
       setAuthToken(response.access_token);
       setUser(response.user);
-    } catch {
-      setError('Authentication failed');
-      setTimeout(() => setError(null), 3000);
+      setError(null);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : 'Authentication failed';
+      console.error('❌ Authentication error:', errorMsg);
+      setError(errorMsg);
+      setTimeout(() => setError(null), 5000);
     }
-  };
+  }, []);
+
+  const handleGoogleError = useCallback((errorMsg: string) => {
+    console.error('❌ Google Sign-In error:', errorMsg);
+    setError(errorMsg);
+    setTimeout(() => setError(null), 5000);
+  }, []);
 
   const handleLogout = () => {
     setAuthToken(null);
@@ -160,7 +171,17 @@ function App() {
             Your AI-powered smart journal. Voice-first, privacy-focused journaling with emotional intelligence.
           </p>
         </div>
-        <GoogleSignIn onSuccess={handleGoogleSuccess} clientId={GOOGLE_CLIENT_ID} />
+        {error && (
+          <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 max-w-md">
+            <p className="text-sm">{error}</p>
+            <p className="text-xs text-red-300 mt-2">Check the browser console (F12) for more details</p>
+          </div>
+        )}
+        <GoogleSignIn 
+          onSuccess={handleGoogleSuccess} 
+          clientId={GOOGLE_CLIENT_ID}
+          onError={handleGoogleError}
+        />
       </div>
     );
   }

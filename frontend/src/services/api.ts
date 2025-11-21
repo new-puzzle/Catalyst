@@ -27,22 +27,54 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     headers['Authorization'] = `Bearer ${authToken}`;
   }
 
-  const response = await fetch(`${API_BASE}${endpoint}`, {
-    headers,
-    ...options,
+  const url = `${API_BASE}${endpoint}`;
+  console.log('📤 API Request:', {
+    method: options?.method || 'GET',
+    url,
+    endpoint
   });
 
-  if (response.status === 401) {
-    setAuthToken(null);
-    throw new Error('Unauthorized');
-  }
+  try {
+    const response = await fetch(url, {
+      headers,
+      ...options,
+    });
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ detail: response.statusText }));
-    throw new Error(error.detail || response.statusText);
-  }
+    console.log('📥 API Response:', {
+      status: response.status,
+      statusText: response.statusText,
+      url
+    });
 
-  return response.json();
+    if (response.status === 401) {
+      setAuthToken(null);
+      throw new Error('Unauthorized - session expired');
+    }
+
+    if (!response.ok) {
+      let errorDetail = response.statusText;
+      try {
+        const errorData = await response.json();
+        errorDetail = errorData.detail || errorData.message || response.statusText;
+      } catch {
+        // If response is not JSON, use statusText
+      }
+      
+      console.error('❌ API Error:', {
+        status: response.status,
+        statusText: response.statusText,
+        detail: errorDetail,
+        url
+      });
+      
+      throw new Error(errorDetail);
+    }
+
+    return response.json();
+  } catch (error) {
+    console.error('❌ API Fetch Failed:', error);
+    throw error;
+  }
 }
 
 export interface AuthUser {
@@ -60,11 +92,27 @@ export interface AuthResponse {
 
 export const api = {
   // Auth
-  googleAuth: (token: string) =>
-    fetchAPI<AuthResponse>('/auth/google', {
+  googleAuth: (token: string) => {
+    console.log('🔍 Sending Google token to backend...');
+    console.log('📊 Token length:', token.length);
+    
+    // Decode JWT payload to see aud field
+    try {
+      const parts = token.split('.');
+      if (parts.length === 3) {
+        const payload = JSON.parse(atob(parts[1]));
+        console.log('📋 Token payload - aud:', payload.aud);
+        console.log('📋 Token payload - email:', payload.email);
+      }
+    } catch (e) {
+      console.warn('⚠️  Could not decode token:', e);
+    }
+    
+    return fetchAPI<AuthResponse>('/auth/google', {
       method: 'POST',
       body: JSON.stringify({ token }),
-    }),
+    });
+  },
 
   getMe: () => fetchAPI<AuthUser>('/auth/me'),
 

@@ -182,3 +182,4 @@ async def update_preferences(
         "status": "updated",
         "preferences": current_user.preferences
     }
+

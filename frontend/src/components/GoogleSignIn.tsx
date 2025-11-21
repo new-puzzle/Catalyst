@@ -4,12 +4,17 @@ import { LogIn } from 'lucide-react';
 interface GoogleSignInProps {
   onSuccess: (credential: string) => void;
   clientId: string;
+  onError?: (error: string) => void;
 }
 
-export function GoogleSignIn({ onSuccess, clientId }: GoogleSignInProps) {
+export function GoogleSignIn({ onSuccess, clientId, onError }: GoogleSignInProps) {
   const buttonRef = useRef<HTMLDivElement>(null);
+  const googleInitialized = useRef(false);
 
   useEffect(() => {
+    // Only load and initialize Google Sign-In once
+    if (googleInitialized.current) return;
+    
     // Load Google Identity Services
     const script = document.createElement('script');
     script.src = 'https://accounts.google.com/gsi/client';
@@ -19,36 +24,64 @@ export function GoogleSignIn({ onSuccess, clientId }: GoogleSignInProps) {
 
     script.onload = () => {
       if (window.google && buttonRef.current) {
-        // Debug: Log the origin and client ID being used
-        console.log('Google Sign-In Debug:', {
+        // Debug info
+        const debugInfo = {
           origin: window.location.origin,
           host: window.location.host,
-          protocol: window.location.protocol,
-          hostname: window.location.hostname,
-          port: window.location.port,
           clientId: clientId ? clientId.substring(0, 20) + '...' : 'MISSING'
-        });
+        };
         
-        window.google.accounts.id.initialize({
-          client_id: clientId,
-          callback: (response: { credential: string }) => {
-            onSuccess(response.credential);
-          },
-        });
+        console.log('🔍 Google Sign-In Debug Info:', debugInfo);
+        console.log('🔍 Using client ID:', clientId);
+        
+        if (!clientId) {
+          console.error('❌ ERROR: Client ID is missing! Check your .env file');
+          onError?.('Client ID not configured');
+          return;
+        }
 
-        window.google.accounts.id.renderButton(buttonRef.current, {
-          theme: 'filled_black',
-          size: 'large',
-          width: 280,
-          text: 'continue_with',
-        });
+        try {
+          window.google.accounts.id.initialize({
+            client_id: clientId,
+            callback: (response: { credential: string }) => {
+              console.log('✅ Google Sign-In successful, token received');
+              onSuccess(response.credential);
+            },
+            error_callback: () => {
+              console.error('❌ Google Sign-In error callback triggered');
+              onError?.('Google Sign-In failed');
+            }
+          });
+
+          window.google.accounts.id.renderButton(buttonRef.current, {
+            theme: 'filled_black',
+            size: 'large',
+            width: 280,
+            text: 'signin_with',
+          });
+          
+          console.log('✅ Google Sign-In button rendered successfully');
+          googleInitialized.current = true;
+        } catch (err) {
+          console.error('❌ Error initializing Google Sign-In:', err);
+          onError?.(err instanceof Error ? err.message : 'Failed to initialize Google Sign-In');
+        }
+      } else {
+        console.error('❌ Google library not loaded or button ref not available');
       }
     };
 
-    return () => {
-      document.body.removeChild(script);
+    script.onerror = () => {
+      console.error('❌ Failed to load Google Sign-In script');
+      onError?.('Failed to load Google Sign-In library');
     };
-  }, [clientId, onSuccess]);
+
+    return () => {
+      if (document.body.contains(script)) {
+        document.body.removeChild(script);
+      }
+    };
+  }, [clientId]); // Only depend on clientId, not the callbacks
 
   return (
     <div className="flex flex-col items-center gap-4">
@@ -83,6 +116,7 @@ declare global {
           initialize: (config: {
             client_id: string;
             callback: (response: { credential: string }) => void;
+            error_callback?: () => void;
           }) => void;
           renderButton: (
             element: HTMLElement,
