@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     google_api_key: str = ""
 
     # JWT Settings
-    jwt_secret_key: str = "your-secret-key-change-in-production"
+    jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60 * 24 * 7  # 7 days
     app_secret_key: str = ""

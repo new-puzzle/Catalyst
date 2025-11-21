@@ -15,7 +15,7 @@ export function setAuthToken(token: string | null) {
 }
 
 export function getAuthToken(): string | null {
-  return authToken;
+  return localStorage.getItem('catalyst_token');
 }
 
 async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> {
@@ -23,8 +23,10 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
     'Content-Type': 'application/json',
   };
 
-  if (authToken) {
-    headers['Authorization'] = `Bearer ${authToken}`;
+  // Always read the latest token from localStorage to ensure we have the most current value
+  const currentToken = localStorage.getItem('catalyst_token');
+  if (currentToken) {
+    headers['Authorization'] = `Bearer ${currentToken}`;
   }
 
   const url = `${API_BASE}${endpoint}`;
@@ -36,8 +38,11 @@ async function fetchAPI<T>(endpoint: string, options?: RequestInit): Promise<T> 
 
   try {
     const response = await fetch(url, {
-      headers,
       ...options,
+      headers: {
+        ...options?.headers,
+        ...headers,
+      },
     });
 
     console.log('📥 API Response:', {
