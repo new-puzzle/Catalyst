@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from pydantic import field_validator
 
 
 class Settings(BaseSettings):
@@ -31,6 +32,14 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expiration_minutes: int = 60 * 24 * 7  # 7 days
     app_secret_key: str = ""
+    
+    @field_validator('jwt_secret_key', mode='before')
+    @classmethod
+    def sanitize_jwt_secret_key(cls, v):
+        """Strip whitespace from JWT secret key to avoid encoding/decoding mismatches."""
+        if isinstance(v, str):
+            return v.strip()
+        return v
 
     # Hume AI
     hume_api_key: str = ""

@@ -2,13 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from jose import JWTError, jwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel
 import httpx
+import logging
 
 from database import get_db
 from database.models import User
 from config import get_settings
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 router = APIRouter(prefix="/auth", tags=["authentication"])
@@ -38,9 +41,11 @@ class UserResponse(BaseModel):
 
 def create_access_token(data: dict) -> str:
     to_encode = data.copy()
-    expire = datetime.utcnow() + timedelta(minutes=settings.jwt_expiration_minutes)
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.jwt_expiration_minutes)
     to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    encoded_token = jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+    logger.info(f"✅ JWT token created successfully for user_id: {data.get('sub')}")
+    return encoded_token
 
 
 async def get_current_user(
@@ -48,6 +53,7 @@ async def get_current_user(
     db: Session = Depends(get_db)
 ) -> User:
     if not token:
+        logger.warning("❌ JWT token not provided in Authorization header")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
@@ -55,17 +61,24 @@ async def get_current_user(
         )
 
     try:
+        logger.debug(f"🔍 Attempting to decode JWT token (length: {len(token)})")
         payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+        logger.debug(f"✅ JWT token decoded successfully. Payload keys: {list(payload.keys())}")
+        
         user_id: int = payload.get("sub")
         if user_id is None:
-            raise HTTPException(status_code=401, detail="Invalid token")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Invalid token")
+            logger.error("❌ JWT token missing 'sub' claim")
+            raise HTTPException(status_code=401, detail="Invalid token: missing user ID")
+    except JWTError as e:
+        logger.error(f"❌ JWT decoding failed: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
     user = db.query(User).filter(User.id == user_id).first()
     if user is None:
+        logger.warning(f"❌ User not found for user_id: {user_id}")
         raise HTTPException(status_code=401, detail="User not found")
 
+    logger.info(f"✅ User authenticated successfully: {user.email}")
     return user
 
 
@@ -128,7 +141,7 @@ async def google_auth(request: GoogleAuthRequest, db: Session = Depends(get_db))
         db.refresh(user)
 
     # Create JWT
-    access_token = create_access_token({"sub": user.id})
+    access_token = create_access_token({"sub": str(user.id)})
 
     return TokenResponse(
         access_token=access_token,

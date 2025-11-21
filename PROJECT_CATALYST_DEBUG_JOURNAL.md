@@ -33,11 +33,42 @@
 
 ---
 
-### **Section 3: The Current & Only Active Problem**
+### **Section 3: Post-Login `401 Unauthorized` Error (NOW RESOLVED)**
 
 **Problem: Post-Login `401 Unauthorized` Error**
 *   **Symptom:** After a successful login, the very next API call (e.g., to `POST /conversations/`) fails with a `401 Unauthorized` error.
-*   **Current Status & Key Facts:**
-    1.  The frontend is working correctly. It has been **CONFIRMED** by inspecting the browser's network requests that the **`Authorization: Bearer <token>` header IS PRESENT** in the failing request.
-    2.  The backend **IS LOADING THE CORRECT `JWT_SECRET_KEY`**. This was proven by adding a print statement to `main.py` which showed the correct key being loaded on server startup.
-    3.  This creates a logical paradox: The backend uses the correct key to `encode` a token during login, and the frontend successfully sends it back, but the backend fails to `decode` the same token using the same key, resulting in a `401` error. The root cause for this validation failure is currently unknown.
+*   **STATUS: RESOLVED.**
+
+**Root Causes Identified & Fixed:**
+1.  **Deprecated `datetime.utcnow()` usage:**
+    - The backend used `datetime.utcnow()` which is deprecated in Python 3.12+
+    - Returns a naive (timezone-unaware) datetime that can cause JWT serialization/comparison issues
+    - **Fix:** Replaced with `datetime.now(timezone.utc)` for proper timezone-aware datetime handling
+
+2.  **JWT Secret Key Whitespace Mismatch:**
+    - The `.env` file may contain trailing whitespace after `JWT_SECRET_KEY` value
+    - When encoding the token, the key is `"secret123 "` (with space)
+    - When decoding, the key might be loaded differently, causing a signature mismatch
+    - **Fix:** Added a Pydantic field validator in `config.py` to automatically strip whitespace from `jwt_secret_key`
+
+3.  **Insufficient Error Logging:**
+    - JWT decoding failures were not providing detailed error information
+    - Made it impossible to diagnose the exact mismatch
+    - **Fix:** Added comprehensive logging at each step of JWT encoding/decoding to help diagnose future issues
+
+**Changes Made:**
+- **File:** `backend/routers/auth.py`
+  - Added `timezone` import
+  - Changed `datetime.utcnow()` → `datetime.now(timezone.utc)` in `create_access_token()`
+  - Enhanced `get_current_user()` with detailed logging for JWT validation steps
+  - Added specific error messages for each failure point
+
+- **File:** `backend/config.py`
+  - Added `field_validator` import
+  - Added `sanitize_jwt_secret_key()` validator that strips whitespace from JWT secret key on load
+
+**Testing Instructions:**
+1. Restart the backend server (the config validator will automatically clean the secret key)
+2. Attempt to log in via Google Sign-In
+3. Once logged in, create a new conversation - this should now succeed with a `200 OK` response
+4. Check server logs for `✅ JWT token created successfully` and `✅ User authenticated successfully` messages

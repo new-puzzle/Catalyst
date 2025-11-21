@@ -44,7 +44,6 @@ def startup():
         logger.info("Database initialized successfully")
         start_scheduler()
         logger.info("Background scheduler started")
-        print(f"Loaded JWT Secret Key: {settings.jwt_secret_key}")
     except Exception as e:
         logger.error(f"Failed to initialize: {e}")
         raise
