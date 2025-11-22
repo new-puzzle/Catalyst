@@ -1,4 +1,4 @@
-const CACHE_NAME = 'catalyst-v1';
+const CACHE_NAME = 'catalyst-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
@@ -34,6 +34,12 @@ self.addEventListener('fetch', (event) => {
 
   // Skip non-GET requests
   if (request.method !== 'GET') return;
+
+  // Skip WebSocket connections (Vite HMR)
+  if (url.protocol === 'ws:' || url.protocol === 'wss:') return;
+
+  // Skip Vite HMR requests
+  if (url.pathname.includes('__vite') || url.pathname.includes('@vite')) return;
 
   // API calls: network-first
   if (url.pathname.startsWith('/api')) {
