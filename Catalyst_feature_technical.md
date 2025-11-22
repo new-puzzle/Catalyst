@@ -42,9 +42,11 @@
 | DeepSeek | deepseek-chat | Planning, architecture | $0.14 |
 | Anthropic | Claude Sonnet 4 | Quality writing, simulation | $3.00 |
 
-### Voice
+### Voice & Speech
+- **Google Cloud STT** - Speech-to-Text with browser fallback
+- **Google Cloud TTS** - Text-to-Speech for AI responses (Neural2 voices)
 - **Gemini Live API** - Real-time bidirectional voice streaming
-- **Hume AI** (optional) - Emotion detection from voice
+- **Hume AI** (optional) - Emotion detection from voice (toggle on/off)
 
 ## API Endpoints
 
@@ -76,8 +78,10 @@ POST   /messages/{conv}/journal - Create journal-only entry
 
 ### Voice
 ```
-WS  /voice/stream   - Real-time voice WebSocket
-GET /voice/voices   - List available voices
+WS   /voice/stream   - Real-time voice WebSocket
+GET  /voice/voices   - List available voices
+POST /voice/stt      - Speech-to-Text (Google Cloud)
+POST /voice/tts      - Text-to-Speech (Google Cloud)
 ```
 
 ### Documents
@@ -168,6 +172,25 @@ GET /synthesis/weekly    - Get weekly synthesis
 {"type": "error", "data": "message"}
 ```
 
+## Text-to-Speech Behavior
+
+### Auto TTS
+- When user sends message via voice input
+- AI response automatically plays via Google Cloud TTS
+- Uses Neural2 voices for natural-sounding speech
+
+### Manual TTS
+- Speaker button on all AI messages (hover to reveal)
+- Click to play message content on demand
+- Visual indicator (pulse) during playback
+
+### Speech-to-Text Flow
+1. User clicks voice orb
+2. MediaRecorder captures audio (WebM/Opus)
+3. Audio sent to `/voice/stt` endpoint
+4. Google Cloud STT returns transcript
+5. Falls back to Web Speech API on error
+
 ## Security
 
 - **JWT tokens** for API authentication
@@ -214,7 +237,9 @@ Catalyst/
 │   ├── src/
 │   │   ├── App.tsx          # Main component
 │   │   ├── components/      # UI components
-│   │   ├── hooks/           # Custom hooks
+│   │   ├── hooks/
+│   │   │   ├── useHumeVoice.ts    # Hume emotion voice
+│   │   │   └── useGoogleSpeech.ts # Google STT with fallback
 │   │   ├── services/api.ts  # API client
 │   │   └── types/           # TypeScript types
 │   └── vite.config.ts       # Build config

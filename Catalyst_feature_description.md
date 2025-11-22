@@ -8,8 +8,10 @@ Catalyst is your personal AI-powered journaling companion. Think of it as a smar
 
 ### Voice-First Experience
 - **Talk naturally** - Just speak your thoughts like you're talking to a friend
-- **Real-time conversation** - The AI responds with voice, creating a natural back-and-forth dialogue
-- **Emotion detection** - Understands not just what you say, but how you feel when saying it
+- **AI speaks back** - Automatically reads responses when you use voice input
+- **Manual playback** - Click speaker icon on any AI message to hear it
+- **Emotion detection** - Optional Hume AI understands how you feel when speaking
+- **Works on mobile** - Google Cloud STT ensures reliable voice on Android Chrome
 
 ### Four Conversation Modes
 
