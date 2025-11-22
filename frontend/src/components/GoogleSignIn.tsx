@@ -17,7 +17,7 @@ export function GoogleSignIn({ onSuccess, clientId, onError }: GoogleSignInProps
     
     // Load Google Identity Services
     const script = document.createElement('script');
-    script.src = 'https://accounts.google.com/gsi/client';
+    script.src = `https://accounts.google.com/gsi/client?cb=${new Date().getTime()}`;
     script.async = true;
     script.defer = true;
     document.body.appendChild(script);
