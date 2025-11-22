@@ -1,0 +1,89 @@
+RECENT CHANGES - Google Cloud STT/TTS Implementation
+===================================================
+
+Date: 2025-11-22
+Commit: 3a62ded
+Branch: claude/implement-project-requirements-01NDxSr2J9K6xY1KmCmqpGJj
+
+SUMMARY
+-------
+Implemented Google Cloud Speech-to-Text and Text-to-Speech with:
+- Auto TTS playback when user uses voice input
+- Manual speaker button on all AI messages
+
+
+FILES MODIFIED
+--------------
+
+1. backend/routers/voice.py
+   - Added POST /voice/stt endpoint (Google Cloud Speech-to-Text API)
+   - Added POST /voice/tts endpoint (Google Cloud Text-to-Speech API)
+   - Supports audio/webm format from MediaRecorder
+   - Uses GOOGLE_API_KEY from environment
+
+2. frontend/src/hooks/useGoogleSpeech.ts (NEW FILE)
+   - Custom React hook for voice recording
+   - Uses MediaRecorder API to capture audio
+   - Sends audio to Google Cloud STT
+   - Falls back to browser speech API on error
+   - Returns: isListening, isProcessing, toggleListening
+
+3. frontend/src/services/api.ts
+   - Added speechToText(audioBlob) - sends audio to /voice/stt
+   - Added textToSpeech(text) - gets MP3 from /voice/tts, returns blob URL
+
+4. frontend/src/components/ChatInterface.tsx
+   - Added playTTS(messageId, text) function
+   - Added speaker button on AI messages (hover to see)
+   - Button shows pulse animation while playing
+
+5. frontend/src/App.tsx
+   - Added useRef to track if input was voice (wasVoiceInputRef)
+   - Replaced useBrowserSpeech with useGoogleSpeech
+   - Auto-plays TTS when AI responds to voice input
+   - Updated derived state for voice processing
+
+
+BEHAVIOR
+--------
+
+Voice Input Flow:
+1. User clicks voice orb
+2. MediaRecorder captures audio
+3. Audio sent to Google Cloud STT
+4. Transcript returned and sent to AI
+5. AI response automatically played via TTS
+
+Manual TTS:
+- Hover over any AI message to see speaker button
+- Click to play that message via Google TTS
+
+Toggle Options:
+- Hume enabled: Uses Hume for emotion analysis + voice
+- Hume disabled: Uses Google Cloud STT (better mobile support)
+
+
+ENVIRONMENT VARIABLES REQUIRED
+------------------------------
+GOOGLE_API_KEY - Required for both STT and TTS endpoints
+TTS_VOICE - Optional, defaults to "en-US-Neural2-F"
+
+
+API ENDPOINTS
+-------------
+
+POST /voice/stt
+- Input: audio file (multipart/form-data)
+- Output: { transcript: string, success: boolean }
+
+POST /voice/tts?text={text}
+- Input: text as query parameter
+- Output: MP3 audio file
+
+
+NOTES
+-----
+- Google Cloud STT provides better accuracy than browser Web Speech API
+- Works on mobile Chrome (Android) where browser API is inconsistent
+- TTS uses Neural2 voices for natural-sounding speech
+- Audio URLs are revoked after playback to prevent memory leaks
