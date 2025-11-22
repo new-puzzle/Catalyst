@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Mic, MicOff } from 'lucide-react';
+import { Mic, MicOff, Brain } from 'lucide-react';
 import { Mode, MODES } from '../types';
 
 interface VoiceOrbProps {
@@ -7,9 +7,10 @@ interface VoiceOrbProps {
   isProcessing: boolean;
   mode: Mode;
   onToggle: () => void;
+  humeEnabled?: boolean;
 }
 
-export function VoiceOrb({ isListening, isProcessing, mode, onToggle }: VoiceOrbProps) {
+export function VoiceOrb({ isListening, isProcessing, mode, onToggle, humeEnabled = false }: VoiceOrbProps) {
   const modeConfig = MODES.find(m => m.id === mode)!;
 
   return (
@@ -47,6 +48,13 @@ export function VoiceOrb({ isListening, isProcessing, mode, onToggle }: VoiceOrb
           </>
         )}
 
+        {/* Hume indicator badge */}
+        {humeEnabled && (
+          <div className="absolute -top-1 -right-1 w-6 h-6 bg-purple-500 rounded-full flex items-center justify-center shadow-lg">
+            <Brain className="w-3.5 h-3.5 text-white" />
+          </div>
+        )}
+
         {/* Icon */}
         {isListening ? (
           <Mic className="w-12 h-12 text-white" />
@@ -56,7 +64,11 @@ export function VoiceOrb({ isListening, isProcessing, mode, onToggle }: VoiceOrb
       </motion.button>
 
       <p className="text-sm text-gray-400">
-        {isProcessing ? 'Processing...' : isListening ? 'Listening...' : 'Tap to speak'}
+        {isProcessing
+          ? 'Processing...'
+          : isListening
+            ? (humeEnabled ? 'Listening (with emotions)...' : 'Listening...')
+            : 'Tap to speak'}
       </p>
     </div>
   );

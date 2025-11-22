@@ -12,8 +12,9 @@ import {
 } from './components';
 import { api, setAuthToken, getAuthToken, AuthUser } from './services/api';
 import { useHumeVoice } from './hooks/useHumeVoice';
+import { useBrowserSpeech } from './hooks/useBrowserSpeech';
 import { Mode, Message, Conversation } from './types';
-import { Sparkles, History, Plus, LogOut } from 'lucide-react';
+import { Sparkles, History, Plus, LogOut, Brain, Mic } from 'lucide-react';
 
 // Get from environment or config
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
@@ -28,9 +29,14 @@ function App() {
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [humeEnabled, setHumeEnabled] = useState(true);
 
-  // Hume voice integration
-  const { isListening, isProcessing: isVoiceProcessing, toggleListening } = useHumeVoice({
+  // Hume voice integration (with emotion analysis)
+  const {
+    isListening: isHumeListening,
+    isProcessing: isHumeProcessing,
+    toggleListening: toggleHumeListening
+  } = useHumeVoice({
     apiKey: HUME_API_KEY,
     onResult: (result) => {
       if (result.transcript && result.transcript !== '[Voice input received - please type your message]') {
@@ -46,6 +52,25 @@ function App() {
     },
   });
 
+  // Browser speech recognition (no emotion analysis)
+  const {
+    isListening: isBrowserListening,
+    toggleListening: toggleBrowserListening,
+  } = useBrowserSpeech({
+    onResult: (transcript) => {
+      handleSendMessage(transcript);
+    },
+    onError: (errorMsg) => {
+      setError(errorMsg);
+      setTimeout(() => setError(null), 3000);
+    },
+  });
+
+  // Derived state for voice
+  const isListening = humeEnabled ? isHumeListening : isBrowserListening;
+  const isVoiceProcessing = humeEnabled ? isHumeProcessing : false;
+  const toggleListening = humeEnabled ? toggleHumeListening : toggleBrowserListening;
+
   // Check for existing auth on mount
   useEffect(() => {
     const checkAuth = async () => {
@@ -53,6 +78,13 @@ function App() {
         try {
           const userData = await api.getMe();
           setUser(userData);
+          // Load preferences
+          try {
+            const prefs = await api.getPreferences();
+            setHumeEnabled(prefs.hume_enabled);
+          } catch {
+            // Use default if preferences not available
+          }
         } catch {
           setAuthToken(null);
         }
@@ -69,6 +101,20 @@ function App() {
     }
   }, [user]);
 
+  // Save preference when humeEnabled changes
+  const handleToggleHume = async () => {
+    const newValue = !humeEnabled;
+    setHumeEnabled(newValue);
+    try {
+      await api.updatePreferences({
+        hume_enabled: newValue,
+        voice_mode: newValue ? 'hume' : 'browser'
+      });
+    } catch (err) {
+      console.error('Failed to save preference:', err);
+    }
+  };
+
   const handleGoogleSuccess = useCallback(async (credential: string) => {
     try {
       console.log('🔍 Google Sign-In successful, authenticating with backend...');
@@ -77,6 +123,13 @@ function App() {
       setAuthToken(response.access_token);
       setUser(response.user);
       setError(null);
+      // Load preferences after login
+      try {
+        const prefs = await api.getPreferences();
+        setHumeEnabled(prefs.hume_enabled);
+      } catch {
+        // Use default
+      }
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Authentication failed';
       console.error('❌ Authentication error:', errorMsg);
@@ -177,14 +230,16 @@ function App() {
             <p className="text-xs text-red-300 mt-2">Check the browser console (F12) for more details</p>
           </div>
         )}
-        <GoogleSignIn 
-          onSuccess={handleGoogleSuccess} 
+        <GoogleSignIn
+          onSuccess={handleGoogleSuccess}
           clientId={GOOGLE_CLIENT_ID}
           onError={handleGoogleError}
         />
       </div>
     );
   }
+
+  const voiceAvailable = humeEnabled ? !!HUME_API_KEY : true;
 
   return (
     <div className="h-screen flex flex-col bg-gray-900">
@@ -196,6 +251,31 @@ function App() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Hume Toggle */}
+          {HUME_API_KEY && (
+            <button
+              onClick={handleToggleHume}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                humeEnabled
+                  ? 'bg-catalyst-600 text-white'
+                  : 'bg-gray-700 text-gray-300'
+              }`}
+              title={humeEnabled ? 'Emotion analysis ON' : 'Emotion analysis OFF'}
+            >
+              {humeEnabled ? (
+                <>
+                  <Brain className="w-4 h-4" />
+                  <span className="hidden sm:inline">Emotions</span>
+                </>
+              ) : (
+                <>
+                  <Mic className="w-4 h-4" />
+                  <span className="hidden sm:inline">Voice Only</span>
+                </>
+              )}
+            </button>
+          )}
+
           <UsageStats />
           <button
             onClick={createNewConversation}
@@ -253,15 +333,18 @@ function App() {
             animate={{ opacity: 1, y: 0 }}
             className="text-center max-w-md"
           >
-            <VoiceOrb
-              isListening={isListening}
-              isProcessing={isProcessing || isVoiceProcessing}
-              mode={mode}
-              onToggle={toggleListening}
-            />
+            {voiceAvailable && (
+              <VoiceOrb
+                isListening={isListening}
+                isProcessing={isProcessing || isVoiceProcessing}
+                mode={mode}
+                onToggle={toggleListening}
+                humeEnabled={humeEnabled}
+              />
+            )}
             <p className="mt-8 text-gray-400">
-              {HUME_API_KEY
-                ? 'Start speaking or type below to begin your journal entry'
+              {voiceAvailable
+                ? `Start speaking or type below${humeEnabled ? ' (with emotion analysis)' : ''}`
                 : 'Type below to begin your journal entry'}
             </p>
           </motion.div>
@@ -269,13 +352,14 @@ function App() {
       )}
 
       {/* Show voice orb inline when there are messages */}
-      {messages.length > 0 && HUME_API_KEY && (
+      {messages.length > 0 && voiceAvailable && (
         <div className="flex justify-center py-4">
           <VoiceOrb
             isListening={isListening}
             isProcessing={isProcessing || isVoiceProcessing}
             mode={mode}
             onToggle={toggleListening}
+            humeEnabled={humeEnabled}
           />
         </div>
       )}
