@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import {
   VoiceOrb,
@@ -12,7 +12,7 @@ import {
 } from './components';
 import { api, setAuthToken, getAuthToken, AuthUser } from './services/api';
 import { useHumeVoice } from './hooks/useHumeVoice';
-import { useBrowserSpeech } from './hooks/useBrowserSpeech';
+import { useGoogleSpeech } from './hooks/useGoogleSpeech';
 import { Mode, Message, Conversation } from './types';
 import { Sparkles, History, Plus, LogOut, Brain, Mic } from 'lucide-react';
 
@@ -30,6 +30,7 @@ function App() {
   const [showHistory, setShowHistory] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [humeEnabled, setHumeEnabled] = useState(true);
+  const wasVoiceInputRef = useRef(false);
 
   // Hume voice integration (with emotion analysis)
   const {
@@ -40,6 +41,7 @@ function App() {
     apiKey: HUME_API_KEY,
     onResult: (result) => {
       if (result.transcript && result.transcript !== '[Voice input received - please type your message]') {
+        wasVoiceInputRef.current = true;
         handleSendMessage(result.transcript, {
           primaryEmotion: result.primaryEmotion,
           emotions: result.emotions.reduce((acc, e) => ({ ...acc, [e.name]: e.score }), {}),
@@ -52,12 +54,14 @@ function App() {
     },
   });
 
-  // Browser speech recognition (no emotion analysis)
+  // Google Cloud STT (no emotion analysis)
   const {
-    isListening: isBrowserListening,
-    toggleListening: toggleBrowserListening,
-  } = useBrowserSpeech({
+    isListening: isGoogleListening,
+    isProcessing: isGoogleProcessing,
+    toggleListening: toggleGoogleListening,
+  } = useGoogleSpeech({
     onResult: (transcript) => {
+      wasVoiceInputRef.current = true;
       handleSendMessage(transcript);
     },
     onError: (errorMsg) => {
@@ -67,9 +71,9 @@ function App() {
   });
 
   // Derived state for voice
-  const isListening = humeEnabled ? isHumeListening : isBrowserListening;
-  const isVoiceProcessing = humeEnabled ? isHumeProcessing : false;
-  const toggleListening = humeEnabled ? toggleHumeListening : toggleBrowserListening;
+  const isListening = humeEnabled ? isHumeListening : isGoogleListening;
+  const isVoiceProcessing = humeEnabled ? isHumeProcessing : isGoogleProcessing;
+  const toggleListening = humeEnabled ? toggleHumeListening : toggleGoogleListening;
 
   // Check for existing auth on mount
   useEffect(() => {
@@ -178,6 +182,10 @@ function App() {
     setIsProcessing(true);
     setError(null);
 
+    // Capture if this was voice input before resetting
+    const shouldAutoPlayTTS = wasVoiceInputRef.current;
+    wasVoiceInputRef.current = false;
+
     // Add user message optimistically
     const tempUserMsg: Message = {
       id: Date.now(),
@@ -191,6 +199,19 @@ function App() {
     try {
       const response = await api.sendMessage(conversation.id, content, mode);
       setMessages(prev => [...prev.slice(0, -1), tempUserMsg, response]);
+
+      // Auto-play TTS for AI response if user used voice input
+      if (shouldAutoPlayTTS && response.content) {
+        try {
+          const audioUrl = await api.textToSpeech(response.content);
+          const audio = new Audio(audioUrl);
+          audio.onended = () => URL.revokeObjectURL(audioUrl);
+          audio.onerror = () => URL.revokeObjectURL(audioUrl);
+          audio.play();
+        } catch (ttsErr) {
+          console.error('Auto TTS failed:', ttsErr);
+        }
+      }
     } catch (err) {
       console.error('Failed to send message:', err);
       setError(err instanceof Error ? err.message : 'Failed to send message');

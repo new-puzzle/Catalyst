@@ -2,8 +2,10 @@ import logging
 import json
 import asyncio
 import base64
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException
+from fastapi.responses import Response
 import websockets
+import httpx
 
 from config import get_settings
 from database import SessionLocal
@@ -325,3 +327,144 @@ async def list_voices():
         ],
         "default": "Aoede"
     }
+
+
+@router.post("/stt")
+async def speech_to_text(audio: UploadFile = File(...)):
+    """
+    Convert speech to text using Google Cloud Speech-to-Text API.
+    Accepts audio file (webm, wav, mp3, etc.)
+    """
+    if not settings.google_api_key:
+        raise HTTPException(status_code=500, detail="Google API key not configured")
+
+    try:
+        # Read audio file
+        audio_content = await audio.read()
+        audio_base64 = base64.b64encode(audio_content).decode('utf-8')
+
+        # Determine encoding based on content type
+        content_type = audio.content_type or "audio/webm"
+        if "webm" in content_type:
+            encoding = "WEBM_OPUS"
+        elif "wav" in content_type:
+            encoding = "LINEAR16"
+        elif "mp3" in content_type or "mpeg" in content_type:
+            encoding = "MP3"
+        elif "ogg" in content_type:
+            encoding = "OGG_OPUS"
+        else:
+            encoding = "WEBM_OPUS"  # Default
+
+        # Call Google Cloud Speech-to-Text API
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://speech.googleapis.com/v1/speech:recognize?key={settings.google_api_key}",
+                json={
+                    "config": {
+                        "encoding": encoding,
+                        "sampleRateHertz": 48000,
+                        "languageCode": "en-US",
+                        "enableAutomaticPunctuation": True,
+                        "model": "latest_long"
+                    },
+                    "audio": {
+                        "content": audio_base64
+                    }
+                },
+                timeout=30.0
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Google STT error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=502, detail="Speech recognition failed")
+
+            data = response.json()
+
+            # Extract transcript
+            if "results" in data and data["results"]:
+                transcript = " ".join([
+                    result["alternatives"][0]["transcript"]
+                    for result in data["results"]
+                    if result.get("alternatives")
+                ])
+                return {"transcript": transcript, "success": True}
+            else:
+                return {"transcript": "", "success": True, "message": "No speech detected"}
+
+    except httpx.TimeoutException:
+        logger.error("Google STT timeout")
+        raise HTTPException(status_code=504, detail="Speech recognition timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Google STT network error: {e}")
+        raise HTTPException(status_code=503, detail="Network error during speech recognition")
+    except Exception as e:
+        logger.error(f"STT error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/tts")
+async def text_to_speech(text: str, voice: str = "en-US-Neural2-F"):
+    """
+    Convert text to speech using Google Cloud Text-to-Speech API.
+    Returns audio as MP3.
+
+    Available voices:
+    - en-US-Neural2-F (female, natural)
+    - en-US-Neural2-D (male, natural)
+    - en-US-Wavenet-F (female, premium)
+    - en-US-Wavenet-D (male, premium)
+    """
+    if not settings.google_api_key:
+        raise HTTPException(status_code=500, detail="Google API key not configured")
+
+    if not text or len(text.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    # Use configured voice or default
+    tts_voice = settings.tts_voice if settings.tts_voice else voice
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://texttospeech.googleapis.com/v1/text:synthesize?key={settings.google_api_key}",
+                json={
+                    "input": {"text": text},
+                    "voice": {
+                        "languageCode": "en-US",
+                        "name": tts_voice
+                    },
+                    "audioConfig": {
+                        "audioEncoding": "MP3",
+                        "speakingRate": 1.0,
+                        "pitch": 0
+                    }
+                },
+                timeout=30.0
+            )
+
+            if response.status_code != 200:
+                logger.error(f"Google TTS error: {response.status_code} - {response.text}")
+                raise HTTPException(status_code=502, detail="Text-to-speech failed")
+
+            data = response.json()
+
+            if "audioContent" in data:
+                audio_content = base64.b64decode(data["audioContent"])
+                return Response(
+                    content=audio_content,
+                    media_type="audio/mpeg",
+                    headers={"Content-Disposition": "inline; filename=speech.mp3"}
+                )
+            else:
+                raise HTTPException(status_code=502, detail="No audio generated")
+
+    except httpx.TimeoutException:
+        logger.error("Google TTS timeout")
+        raise HTTPException(status_code=504, detail="Text-to-speech timeout")
+    except httpx.RequestError as e:
+        logger.error(f"Google TTS network error: {e}")
+        raise HTTPException(status_code=503, detail="Network error during text-to-speech")
+    except Exception as e:
+        logger.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

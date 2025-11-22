@@ -49,6 +49,26 @@ export function ChatInterface({ messages, isLoading, onMessageUpdate, onMessageD
     audio.play();
   };
 
+  const playTTS = async (messageId: number, text: string) => {
+    try {
+      setPlayingAudio(messageId);
+      const audioUrl = await api.textToSpeech(text);
+      const audio = new Audio(audioUrl);
+      audio.onended = () => {
+        setPlayingAudio(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+      audio.onerror = () => {
+        setPlayingAudio(null);
+        URL.revokeObjectURL(audioUrl);
+      };
+      audio.play();
+    } catch (err) {
+      console.error('TTS playback failed:', err);
+      setPlayingAudio(null);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-4 space-y-4">
       <AnimatePresence>
@@ -104,7 +124,7 @@ export function ChatInterface({ messages, isLoading, onMessageUpdate, onMessageD
                 )}
               </div>
 
-              {/* Action buttons */}
+              {/* Action buttons for user messages */}
               {message.role === 'user' && editingId !== message.id && (
                 <div className="absolute -top-2 right-0 hidden group-hover:flex gap-1 bg-gray-700 rounded p-1">
                   {(message as any).audio_file_path && (
@@ -129,6 +149,20 @@ export function ChatInterface({ messages, isLoading, onMessageUpdate, onMessageD
                     className="p-1 hover:bg-gray-600 rounded text-red-400"
                   >
                     <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* TTS button for assistant messages */}
+              {message.role === 'assistant' && (
+                <div className="absolute -top-2 left-0 hidden group-hover:flex gap-1 bg-gray-700 rounded p-1">
+                  <button
+                    onClick={() => playTTS(message.id, message.content)}
+                    className={`p-1 hover:bg-gray-600 rounded ${playingAudio === message.id ? 'text-catalyst-400 animate-pulse' : ''}`}
+                    disabled={playingAudio === message.id}
+                    title="Play with TTS"
+                  >
+                    <Volume2 className="w-3 h-3" />
                   </button>
                 </div>
               )}

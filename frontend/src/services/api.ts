@@ -191,4 +191,49 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify(preferences),
     }),
+
+  // Speech-to-Text
+  speechToText: async (audioBlob: Blob): Promise<{ transcript: string; success: boolean }> => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'recording.webm');
+
+    const headers: Record<string, string> = {};
+    const currentToken = localStorage.getItem('catalyst_token');
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/voice/stt`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    });
+
+    if (!response.ok) {
+      throw new Error('Speech recognition failed');
+    }
+
+    return response.json();
+  },
+
+  // Text-to-Speech - returns audio URL
+  textToSpeech: async (text: string): Promise<string> => {
+    const headers: Record<string, string> = {};
+    const currentToken = localStorage.getItem('catalyst_token');
+    if (currentToken) {
+      headers['Authorization'] = `Bearer ${currentToken}`;
+    }
+
+    const response = await fetch(`${API_BASE}/voice/tts?text=${encodeURIComponent(text)}`, {
+      method: 'POST',
+      headers,
+    });
+
+    if (!response.ok) {
+      throw new Error('Text-to-speech failed');
+    }
+
+    const audioBlob = await response.blob();
+    return URL.createObjectURL(audioBlob);
+  },
 };
